@@ -66,11 +66,13 @@ final class ConnectClient
             $headers['Idempotency-Key'] = $idempotencyKey;
         }
 
+        $options = ['headers' => $headers];
+        if ($body !== null) {
+            $options['json'] = $body;
+        }
+
         try {
-            $response = $this->http->request(strtoupper($method), $url, [
-                'headers' => $headers,
-                'json' => $body,
-            ]);
+            $response = $this->http->request(strtoupper($method), $url, $options);
         } catch (GuzzleException $e) {
             throw new ConnectException(
                 message: 'Unable to reach PrymeStudy Connect.',
