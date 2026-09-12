@@ -1,4 +1,4 @@
-import { importPKCS8, SignJWT, type KeyLike } from "jose";
+import { importPKCS8, SignJWT } from "jose";
 
 export type ConnectAlgorithm = "ES256" | "EdDSA";
 
@@ -35,7 +35,7 @@ export class ConnectError extends Error {
 
 export class ConnectClient {
   readonly #config: Required<Pick<ConnectConfig, "algorithm" | "assertionTtlSeconds" | "requestTimeoutMs">> & ConnectConfig;
-  #signingKey?: KeyLike | Uint8Array;
+  #signingKey?: CryptoKey;
   #accessToken?: string;
   #accessTokenExpiresAt = 0;
 
