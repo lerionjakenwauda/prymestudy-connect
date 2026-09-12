@@ -1,26 +1,8 @@
 # Webhooks
 
-## Purpose
-
-PrymeStudy Connect webhooks deliver institution-approved events to registered HTTPS endpoints.
-
-Webhook delivery is asynchronous and at-least-once. Consumers must therefore verify authenticity and process events idempotently.
-
-## Endpoint requirements
-
-Production webhook endpoints must:
-
-- use HTTPS;
-- be explicitly registered to one integration/environment;
-- not redirect to unregistered hosts;
-- return quickly and perform expensive work asynchronously;
-- tolerate retries and out-of-order delivery where the event type permits it.
+PrymeStudy Connect webhooks deliver institution-approved events to registered HTTPS endpoints. Delivery is asynchronous and at-least-once, so consumers must verify authenticity and process events idempotently.
 
 ## Event envelope
-
-Every event follows the public webhook schema.
-
-Example:
 
 ```json
 {
@@ -37,87 +19,76 @@ Example:
 }
 ```
 
-Consumers must branch on `type`, not infer event meaning from arbitrary fields.
+Consumers branch on `type` and use `id` as the durable event/deduplication identifier.
 
-## Signing
+## Connect Webhook Signature v1
 
-PrymeStudy signs webhook deliveries at the HTTP layer.
+Production webhook deliveries use a versioned ES256 signature profile. PrymeStudy holds the signing private key; consumers verify with the published/registered P-256 public key identified by `kid`.
 
-The preferred signature profile uses standard HTTP Message Signatures with a registered PrymeStudy verification key.
-
-The signed component set should include the request method/target and integrity-sensitive headers such as the content digest, event identifier and timestamp.
-
-Consumers must reject a delivery when:
-
-- signature verification fails;
-- the signing key is unknown/revoked;
-- the event timestamp is outside the accepted freshness window;
-- the content digest does not match the body;
-- the delivery/event identifier is a disallowed replay;
-- the integration/environment binding is inconsistent.
-
-## Delivery headers
-
-Conceptual headers:
+Headers:
 
 ```http
 Content-Type: application/json
-Content-Digest: sha-256=:...:
+X-PrymeStudy-Signature-Version: v1
 X-PrymeStudy-Event-Id: evt_01J...
-X-PrymeStudy-Timestamp: 2026-09-12T20:48:00Z
-Signature-Input: ...
-Signature: ...
+X-PrymeStudy-Timestamp: 1800000000
+X-PrymeStudy-Key-Id: whk_live_...
+X-PrymeStudy-Signature: <base64url P1363 ES256 signature>
 ```
 
-Implementations should use the official SDK verifier rather than reconstructing signature canonicalization manually where an SDK exists.
+The exact **raw HTTP body bytes** are hashed with SHA-256. PrymeStudy signs this UTF-8 canonical message:
 
-## Idempotency
+```text
+v1\n{unix_timestamp}\n{event_id}\n{sha256_hex(raw_body)}
+```
 
-Use `id` as the durable event identity.
+The ES256 signature is encoded as the 64-byte IEEE-P1363 value (`R || S`) and then base64url encoded without padding.
 
-A consumer should record processed event IDs and safely return success when the same event is delivered again after successful processing.
+Official SDKs implement this verification profile. Consumers should use the SDK verifier rather than reimplementing ECDSA/canonicalization.
 
-Do not use timestamp alone as the deduplication key.
+## Required verification order
+
+Before processing an event:
+
+1. require signature version `v1`;
+2. require event ID, timestamp, key ID and signature headers;
+3. resolve the signing public key for the key ID;
+4. reject timestamps outside the configured freshness window (300 seconds by default);
+5. hash the exact raw body and reconstruct the canonical message;
+6. verify the ES256 signature;
+7. parse JSON only after signature verification;
+8. require the JSON `id` to match the signed event ID header;
+9. check durable replay/idempotency storage for that event ID;
+10. process the event transactionally and record the event ID as processed.
+
+A cryptographically valid event may still be unauthorized for a consumer if its integration/environment does not match local configuration; enforce that binding too.
+
+## Key rotation
+
+Webhook signing keys have IDs and lifecycle status. Rotation should allow a bounded overlap period in which both the retiring and new public keys are available for verification. Private signing keys are never distributed to consumers.
 
 ## Retries
 
-PrymeStudy may retry eligible failures.
-
-Consumers should distinguish:
+PrymeStudy may retry eligible failures using bounded backoff.
 
 - `2xx`: accepted/successful;
-- `4xx`: generally permanent consumer/request failure unless documented otherwise;
-- `429`: temporary rate-limit/backpressure signal;
-- `5xx`: temporary consumer failure eligible for retry.
+- `429`: temporary backpressure/rate limit;
+- `5xx`: temporary consumer failure;
+- most other `4xx`: permanent consumer/request failure.
 
-Retry schedules should use bounded exponential backoff with jitter.
+Global ordering is not guaranteed. Where ordering matters, event data can include resource version/sequence information.
 
-## Ordering
+## Endpoint requirements
 
-Global ordering is not guaranteed.
+Production endpoints must:
 
-Where ordering matters, event payloads may include a resource version or sequence value. Consumers must not assume that network arrival order equals canonical update order.
+- use HTTPS;
+- belong to one approved integration/environment;
+- avoid unregistered redirect chains;
+- return quickly and perform expensive work asynchronously;
+- tolerate retries;
+- reject oversized bodies according to the published event limit.
 
-## Endpoint rotation
+## Sensitive data
 
-Changing a webhook endpoint or verification key is a security-sensitive operation and should be audited.
-
-Key rotation should support an overlap window where both the old and new verification keys can be trusted according to published lifecycle status.
-
-## Failure isolation
-
-Repeated failures may cause an endpoint to be paused without disabling unrelated integrations or endpoints.
-
-Operational dashboards should expose delivery status, failure counts and recent attempts without exposing full sensitive payloads by default.
-
-## Secret and PII handling
-
-Never include:
-
-- access tokens;
-- private keys;
-- passwords;
-- OTPs;
-- unnecessary personal data.
-
-Webhook payloads should carry only the information required by the event contract and approved integration scopes.
+Webhook payloads must not contain private keys, access tokens, passwords, OTPs or unnecessary personal data. Consumers should also avoid logging full sensitive payloads by default.
