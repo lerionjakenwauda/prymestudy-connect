@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import time
-from typing import Any, Mapping
-from urllib.parse import urljoin
+from typing import Any, Mapping, Sequence
+from urllib.parse import quote, urljoin
 from uuid import uuid4
 
 import httpx
@@ -46,6 +46,8 @@ class ConnectConfig:
             raise ValueError("private_key_pem is required")
         if not self.key_id:
             raise ValueError("key_id is required")
+        if self.algorithm != "ES256":
+            raise ValueError("PrymeStudy Connect v1 supports ES256 client assertions")
         if not self.token_endpoint.startswith(("https://", "http://")):
             raise ValueError("token_endpoint must be an absolute HTTP(S) URL")
         if not self.api_base_url.startswith(("https://", "http://")):
@@ -54,6 +56,8 @@ class ConnectConfig:
             raise ValueError("assertion_ttl_seconds must be between 30 and 300")
         if not 1 <= self.request_timeout_seconds <= 120:
             raise ValueError("request_timeout_seconds must be between 1 and 120")
+        if any(not isinstance(scope, str) or not scope.strip() for scope in self.scopes):
+            raise ValueError("scopes must contain non-empty strings")
 
 
 class ConnectClient:
@@ -78,18 +82,42 @@ class ConnectClient:
         self._access_token = None
         self._access_token_expires_at = 0
 
-    def create_launch(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
+    def create_launch(self, payload: Mapping[str, Any], *, idempotency_key: str | None = None) -> dict[str, Any]:
         return self.request(
             "POST",
             "/connect/v1/launches",
             json=dict(payload),
             idempotency_key=idempotency_key or _random_id("idem"),
         )
+
+    def upsert_students(self, items: Sequence[Mapping[str, Any]], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            "/connect/v1/students:upsert",
+            json={"items": [dict(item) for item in items]},
+            idempotency_key=idempotency_key or _random_id("idem"),
+        )
+
+    def upsert_courses(self, items: Sequence[Mapping[str, Any]], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            "/connect/v1/courses:upsert",
+            json={"items": [dict(item) for item in items]},
+            idempotency_key=idempotency_key or _random_id("idem"),
+        )
+
+    def upsert_enrollments(self, items: Sequence[Mapping[str, Any]], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        return self.request(
+            "POST",
+            "/connect/v1/enrollments:upsert",
+            json={"items": [dict(item) for item in items]},
+            idempotency_key=idempotency_key or _random_id("idem"),
+        )
+
+    def get_sync_job(self, job_id: str) -> dict[str, Any]:
+        if not job_id or "/" in job_id:
+            raise ValueError("job_id must be a non-empty opaque identifier")
+        return self.request("GET", f"/connect/v1/sync-jobs/{quote(job_id, safe='')}")
 
     def request(
         self,
@@ -99,23 +127,24 @@ class ConnectClient:
         json: Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        if not path.startswith("/"):
+            raise ValueError("Connect API paths must start with /")
+
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_access_token()}",
-            "User-Agent": "prymestudy-connect-python/1",
+            "User-Agent": "prymestudy-connect-python/1.0",
         }
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
 
         url = urljoin(self.config.api_base_url.rstrip("/") + "/", path.lstrip("/"))
+        kwargs: dict[str, Any] = {"headers": headers}
+        if json is not None:
+            kwargs["json"] = dict(json)
 
         try:
-            response = self._http.request(
-                method.upper(),
-                url,
-                headers=headers,
-                json=dict(json) if json is not None else None,
-            )
+            response = self._http.request(method.upper(), url, **kwargs)
         except httpx.HTTPError as exc:
             raise ConnectError(str(exc), code="transport_error") from exc
 
@@ -139,10 +168,7 @@ class ConnectClient:
         try:
             response = self._http.post(
                 self.config.token_endpoint,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "prymestudy-connect-python/1",
-                },
+                headers={"Accept": "application/json", "User-Agent": "prymestudy-connect-python/1.0"},
                 data=form,
             )
         except httpx.HTTPError as exc:
@@ -151,7 +177,6 @@ class ConnectClient:
         data = _decode_response(response)
         token = data.get("access_token")
         expires_in_raw = data.get("expires_in", 300)
-
         if not isinstance(token, str) or not token:
             raise ConnectError(
                 "Token response did not contain a valid access_token.",
@@ -169,19 +194,17 @@ class ConnectClient:
         return token
 
     def _client_assertion(self, now: int) -> str:
-        payload = {
-            "iss": self.config.client_id,
-            "sub": self.config.client_id,
-            "aud": self.config.token_endpoint,
-            "iat": now,
-            "exp": now + self.config.assertion_ttl_seconds,
-            "jti": _random_id("jti"),
-        }
-
         return jwt.encode(
-            payload,
+            {
+                "iss": self.config.client_id,
+                "sub": self.config.client_id,
+                "aud": self.config.token_endpoint,
+                "iat": now,
+                "exp": now + self.config.assertion_ttl_seconds,
+                "jti": _random_id("jti"),
+            },
             self.config.private_key_pem,
-            algorithm=self.config.algorithm,
+            algorithm="ES256",
             headers={"kid": self.config.key_id, "typ": "JWT"},
         )
 
@@ -197,7 +220,6 @@ def _decode_response(response: httpx.Response) -> dict[str, Any]:
 
     envelope = data.get("error", {}) if isinstance(data, dict) else {}
     envelope = envelope if isinstance(envelope, dict) else {}
-
     message = envelope.get("message")
     code = envelope.get("code")
     request_id = envelope.get("request_id") or response.headers.get("x-request-id")
