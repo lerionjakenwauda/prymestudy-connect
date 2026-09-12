@@ -1,0 +1,21 @@
+{
+  "name": "prymestudy/connect",
+  "description": "Official PHP SDK for PrymeStudy Connect institutional integrations.",
+  "type": "library",
+  "license": "Apache-2.0",
+  "require": {
+    "php": "^8.2",
+    "ext-json": "*",
+    "ext-openssl": "*",
+    "firebase/php-jwt": "^6.10",
+    "guzzlehttp/guzzle": "^7.8"
+  },
+  "autoload": {
+    "psr-4": {
+      "PrymeStudy\\Connect\\": "src/"
+    }
+  },
+  "config": {
+    "sort-packages": true
+  }
+}
