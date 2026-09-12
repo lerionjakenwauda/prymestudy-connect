@@ -1,0 +1,331 @@
+openapi: 3.1.0
+info:
+  title: PrymeStudy Connect API
+  version: 1.0.0
+  description: Enterprise partner SSO and institutional data integration API for PrymeStudy.
+servers:
+  - url: https://api.prymestudy.com
+    description: Production
+paths:
+  /connect/v1/oauth/token:
+    post:
+      operationId: issueConnectAccessToken
+      summary: Exchange an authenticated client assertion for a short-lived access token
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id, client_assertion_type, client_assertion]
+              properties:
+                grant_type:
+                  type: string
+                  const: client_credentials
+                client_id:
+                  type: string
+                  minLength: 8
+                client_assertion_type:
+                  type: string
+                  const: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+                client_assertion:
+                  type: string
+                  minLength: 32
+                scope:
+                  type: string
+      responses:
+        '200':
+          description: Short-lived access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /connect/v1/launches:
+    post:
+      operationId: createConnectLaunch
+      summary: Create a short-lived one-time PrymeStudy launch
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LaunchRequest'
+      responses:
+        '201':
+          description: Launch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /connect/v1/students:upsert:
+    post:
+      operationId: upsertConnectStudents
+      summary: Create or update institution-scoped student records
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertStudentsRequest'
+      responses:
+        '202':
+          description: Accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /connect/v1/courses:upsert:
+    post:
+      operationId: upsertConnectCourses
+      summary: Create or update institution-scoped course records
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertCoursesRequest'
+      responses:
+        '202':
+          description: Accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /connect/v1/enrollments:upsert:
+    post:
+      operationId: upsertConnectEnrollments
+      summary: Create or update institution-scoped course enrollments
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertEnrollmentsRequest'
+      responses:
+        '202':
+          description: Accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpsertResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /connect/v1/sync-jobs/{jobId}:
+    get:
+      operationId: getConnectSyncJob
+      summary: Read the status of an asynchronous synchronization job
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 128 }
+      responses:
+        '200':
+          description: Sync job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncJob'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+  responses:
+    Error:
+      description: Connect error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, scope]
+      properties:
+        access_token: { type: string, minLength: 32 }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, minimum: 30, maximum: 3600 }
+        scope: { type: string }
+    AcademicClaims:
+      type: object
+      required: [institution]
+      properties:
+        institution: { type: string, minLength: 1, maxLength: 120 }
+        college: { type: string, minLength: 1, maxLength: 120 }
+        department: { type: string, minLength: 1, maxLength: 120 }
+        programme: { type: string, minLength: 1, maxLength: 120 }
+        level: { type: string, minLength: 1, maxLength: 64 }
+      additionalProperties: false
+    IdentityClaims:
+      type: object
+      required: [sub]
+      properties:
+        sub: { type: string, minLength: 8, maxLength: 191 }
+        email: { type: string, format: email, maxLength: 255 }
+        email_verified: { type: boolean }
+        matric_number: { type: string, minLength: 1, maxLength: 191 }
+        first_name: { type: string, maxLength: 120 }
+        last_name: { type: string, maxLength: 120 }
+        other_name: { type: string, maxLength: 120 }
+        phone: { type: string, maxLength: 32 }
+      additionalProperties: false
+    LaunchRequest:
+      type: object
+      required: [identity, academic]
+      properties:
+        identity: { $ref: '#/components/schemas/IdentityClaims' }
+        academic: { $ref: '#/components/schemas/AcademicClaims' }
+        return_url: { type: string, format: uri, maxLength: 2048 }
+        state: { type: string, maxLength: 512 }
+      additionalProperties: false
+    LaunchResponse:
+      type: object
+      required: [launch_id, launch_url, expires_at]
+      properties:
+        launch_id: { type: string }
+        launch_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+    UpsertStudentsRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [external_id]
+            properties:
+              external_id: { type: string, minLength: 1, maxLength: 191 }
+              matric_number: { type: string, maxLength: 191 }
+              email: { type: string, format: email }
+              first_name: { type: string, maxLength: 120 }
+              last_name: { type: string, maxLength: 120 }
+              status: { type: string, maxLength: 40 }
+              academic: { $ref: '#/components/schemas/AcademicClaims' }
+            additionalProperties: false
+      additionalProperties: false
+    UpsertCoursesRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [external_id, code, title]
+            properties:
+              external_id: { type: string, minLength: 1, maxLength: 191 }
+              code: { type: string, minLength: 1, maxLength: 80 }
+              title: { type: string, minLength: 1, maxLength: 255 }
+              units: { type: number, minimum: 0, maximum: 99 }
+              academic: { $ref: '#/components/schemas/AcademicClaims' }
+            additionalProperties: false
+      additionalProperties: false
+    UpsertEnrollmentsRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [external_id, student_external_id, course_external_id, status]
+            properties:
+              external_id: { type: string, minLength: 1, maxLength: 191 }
+              student_external_id: { type: string, minLength: 1, maxLength: 191 }
+              course_external_id: { type: string, minLength: 1, maxLength: 191 }
+              status: { type: string, enum: [enrolled, withdrawn, completed, suspended] }
+            additionalProperties: false
+      additionalProperties: false
+    UpsertResponse:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        job_id: { type: string }
+        accepted: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    SyncJob:
+      type: object
+      required: [job_id, status, created_at]
+      properties:
+        job_id: { type: string }
+        status: { type: string, enum: [queued, processing, completed, partially_failed, failed] }
+        total_items: { type: integer, minimum: 0 }
+        successful_items: { type: integer, minimum: 0 }
+        failed_items: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+            details:
+              type: array
+              items: {}
