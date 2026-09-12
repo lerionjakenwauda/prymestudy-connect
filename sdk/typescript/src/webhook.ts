@@ -1,4 +1,4 @@
-import { importSPKI } from "jose";
+import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 
 export interface WebhookVerificationOptions {
   toleranceSeconds?: number;
@@ -41,20 +41,31 @@ export async function verifyWebhook(
     throw new WebhookVerificationError("Webhook timestamp is outside the accepted freshness window.", "webhook_stale");
   }
 
-  const bytes = typeof rawBody === "string" ? new TextEncoder().encode(rawBody) : rawBody;
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const digestHex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  const message = new TextEncoder().encode(`v1\n${timestamp}\n${eventId}\n${digestHex}`);
-  const signature = base64UrlDecode(signatureRaw);
+  const body = typeof rawBody === "string" ? Buffer.from(rawBody, "utf8") : Buffer.from(rawBody);
+  const digestHex = createHash("sha256").update(body).digest("hex");
+  const message = Buffer.from(`v1\n${timestamp}\n${eventId}\n${digestHex}`, "utf8");
+  let signature: Buffer;
+  try {
+    signature = Buffer.from(signatureRaw, "base64url");
+  } catch {
+    throw new WebhookVerificationError("Webhook signature has an invalid encoding.", "webhook_signature_invalid");
+  }
   if (signature.length !== 64) throw new WebhookVerificationError("Webhook signature has an invalid length.", "webhook_signature_invalid");
 
-  const key = await importSPKI(publicKeyPem, "ES256");
-  const valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signature, message);
+  let valid = false;
+  try {
+    valid = verifySignature("sha256", message, {
+      key: createPublicKey(publicKeyPem),
+      dsaEncoding: "ieee-p1363",
+    }, signature);
+  } catch {
+    throw new WebhookVerificationError("Webhook verification key is invalid.", "webhook_key_invalid");
+  }
   if (!valid) throw new WebhookVerificationError("Webhook signature verification failed.", "webhook_signature_invalid");
 
   let event: unknown;
   try {
-    event = JSON.parse(new TextDecoder().decode(bytes));
+    event = JSON.parse(body.toString("utf8"));
   } catch {
     throw new WebhookVerificationError("Webhook body is not valid JSON.", "webhook_invalid_json");
   }
@@ -72,16 +83,6 @@ function headerReader(headers: Headers | Record<string, string | string[] | unde
     normalized.set(name.toLowerCase(), Array.isArray(value) ? value.join(",") : value);
   }
   return (name) => normalized.get(name.toLowerCase())?.trim() ?? "";
-}
-
-function base64UrlDecode(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-  try {
-    return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
-  } catch {
-    return new Uint8Array();
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
