@@ -7,119 +7,197 @@
 <h1 align="center">PrymeStudy Connect</h1>
 
 <p align="center">
-  <strong>Secure institutional SSO and partner integrations for PrymeStudy.</strong>
+  <strong>Enterprise identity, SIS/LMS, API and event integration for the PrymeStudy ecosystem.</strong>
 </p>
 
 <p align="center">
-  Connect university, department, association, and academic portals to PrymeStudy without rebuilding authentication or exposing student credentials.
+  Connect universities, departments, student associations, portals, student information systems, learning management systems and approved third-party services to PrymeStudy through one secure integration platform.
 </p>
 
 <p align="center">
   <a href="https://prymestudy.com">PrymeStudy</a>
   &nbsp;&middot;&nbsp;
-  <a href="#how-it-works">How it works</a>
+  <a href="#platform-capabilities">Capabilities</a>
   &nbsp;&middot;&nbsp;
-  <a href="#sdk-roadmap">SDK roadmap</a>
+  <a href="#supported-languages">Languages</a>
   &nbsp;&middot;&nbsp;
-  <a href="#security-model">Security</a>
+  <a href="#security-baseline">Security</a>
+  &nbsp;&middot;&nbsp;
+  <a href="#open-source-boundary">Open source</a>
 </p>
 
 ---
 
 ## What is PrymeStudy Connect?
 
-**PrymeStudy Connect** is the public developer layer for integrating approved academic portals with PrymeStudy.
+**PrymeStudy Connect** is the institutional and developer integration layer for PrymeStudy.
 
-A university, department, student association, or other approved academic partner can keep its existing portal and authentication system while giving authenticated students a secure path into PrymeStudy.
+It gives approved academic organisations a consistent way to integrate existing infrastructure with PrymeStudy without replacing their current portals, SIS, LMS or authentication systems.
 
-The partner authenticates its own student. PrymeStudy remains responsible for PrymeStudy accounts, account ownership, institutional mapping, permissions, and PrymeStudy session creation.
-
-The intended experience is simple:
+Connect covers both identity and institutional data exchange:
 
 ```text
-Student signs in to partner portal
-        ↓
-Student clicks “Open PrymeStudy”
-        ↓
-Partner backend creates a signed Connect launch
-        ↓
-PrymeStudy verifies the partner and student identity
-        ↓
-PrymeStudy creates or safely links the student account
-        ↓
-Academic profile is mapped
-        ↓
-Student enters PrymeStudy
+Institution / Partner
+        │
+        ├── Student portal / SSO
+        ├── SIS
+        ├── LMS
+        ├── ERP / academic system
+        ├── Custom backend
+        └── Event consumers
+                │
+                ▼
+        PrymeStudy Connect
+                │
+        ┌───────┼────────┐
+        │       │        │
+        ▼       ▼        ▼
+     Identity   APIs   Webhooks
+        │       │        │
+        └───────┼────────┘
+                ▼
+            PrymeStudy
 ```
 
-Returning students should normally move from their partner portal into PrymeStudy in one action after the identity link has been established.
+PrymeStudy remains authoritative for PrymeStudy accounts, account ownership, institutional mapping, permissions, sessions, entitlements and canonical PrymeStudy records.
+
+The partner remains authoritative for the data and identity claims it is approved to provide.
 
 ---
 
-## Why it exists
+## Platform capabilities
 
-PrymeStudy Connect is designed for institutions and academic communities that already have working portals and do **not** need to replace them just to use PrymeStudy.
+PrymeStudy Connect is one platform with several integration capabilities.
 
-Instead of asking every department to rebuild its student system around PrymeStudy, Connect provides a reusable integration layer.
+### Identity & Partner SSO
 
-For example, the same Connect architecture can support:
+Allow an authenticated student, lecturer or approved institutional user to move from an existing partner portal into PrymeStudy without registering or signing in again.
 
-- a Mathematics departmental portal;
-- a Computer Science departmental portal;
-- a student association portal;
-- a university-wide student portal;
-- another institution with its own identity system.
+```text
+Partner portal session
+        ↓
+Signed server-to-server launch request
+        ↓
+PrymeStudy Connect verifies partner + request
+        ↓
+External identity resolved / created / safely linked
+        ↓
+Academic mapping applied
+        ↓
+Short-lived one-time launch
+        ↓
+Normal PrymeStudy session
+```
 
-Each integration receives its own credentials, mappings, permissions, and audit history.
+### SIS & LMS integration
+
+Synchronize approved institutional data through scoped APIs and controlled data-exchange workflows, including:
+
+- students and institutional identities;
+- colleges, faculties, schools, departments and programmes;
+- academic levels and cohorts;
+- courses and course offerings;
+- enrolments and registrations;
+- attendance where authorized;
+- other academic records exposed by an approved integration scope.
+
+### APIs
+
+Server-to-server API access is isolated per integration and governed by explicit scopes, environment, institution, application identity and policy.
+
+Examples of capability scopes include:
+
+```text
+connect:sso.launch
+students:read
+students:write
+courses:read
+enrollments:read
+enrollments:write
+webhooks:manage
+```
+
+An integration receives only the capabilities required for its approved use case.
+
+### Webhooks
+
+PrymeStudy can deliver signed events to approved HTTPS endpoints so partner systems can react to changes without polling.
+
+Webhook consumers must verify signatures, reject replayed deliveries and process events idempotently.
+
+### Data exchange
+
+Controlled import/export workflows support migration, synchronization and reconciliation while preserving external identifiers and preventing unreviewed writes into canonical academic records.
+
+### Academic mapping
+
+Partners send stable codes they control. They do not depend on PrymeStudy database primary keys.
+
+```text
+Partner code                  PrymeStudy canonical record
+─────────────────────────────────────────────────────────
+LASUSTECH                  →  Institution
+COMPUTER_SCIENCE           →  Department
+BSC_COMPUTER_SCIENCE       →  Programme
+300                        →  Level / cohort
+```
+
+Missing or ambiguous mappings fail safely and require configuration or review. PrymeStudy must never silently attach a user to an arbitrary academic record.
 
 ---
 
-## How it works
+## SSO flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Student
-    participant Partner as Partner Portal
+    actor User
+    participant Portal as Partner Portal
     participant Backend as Partner Backend
     participant Connect as PrymeStudy Connect
-    participant PrymeStudy as PrymeStudy
+    participant Platform as PrymeStudy
 
-    Student->>Partner: Sign in
-    Student->>Partner: Click “Open PrymeStudy”
-    Partner->>Backend: Request Connect launch
-    Backend->>Connect: Signed server-to-server launch request
-    Connect->>Connect: Verify credentials, timestamp, nonce and claims
-    Connect->>PrymeStudy: Resolve external identity + academic mapping
+    User->>Portal: Sign in
+    User->>Portal: Open PrymeStudy
+    Portal->>Backend: Request Connect launch
+    Backend->>Connect: Signed server-to-server request
+    Connect->>Connect: Verify integration, signature, time, nonce/JTI and claims
+    Connect->>Platform: Resolve identity + academic mapping
 
-    alt Existing linked student
-        PrymeStudy-->>Connect: Existing PrymeStudy user
-    else Safe existing-account candidate
-        PrymeStudy-->>Connect: Ownership verification required
-    else New student
-        PrymeStudy-->>Connect: Provision PrymeStudy account
+    alt Existing external identity
+        Platform-->>Connect: Existing PrymeStudy user
+    else Existing account candidate
+        Platform-->>Connect: Ownership verification flow
+    else New identity
+        Platform-->>Connect: Provision controlled PrymeStudy account
     end
 
-    Connect-->>Backend: Short-lived opaque launch URL
-    Backend-->>Partner: Redirect target
-    Partner-->>Student: Redirect
-    Student->>PrymeStudy: Consume one-time launch
-    PrymeStudy-->>Student: Authenticated PrymeStudy session
+    Connect-->>Backend: Opaque one-time launch URL
+    Backend-->>Portal: Redirect target
+    Portal-->>User: Redirect
+    User->>Platform: Consume launch
+    Platform-->>User: PrymeStudy session
 ```
 
-### Important design rule
+### Browser boundary
 
-The browser never receives the partner secret and should never receive raw student identity data in the launch URL.
+The browser must never receive:
 
-Secrets stay on trusted server-side systems.
+- partner private signing keys or client secrets;
+- raw credentials;
+- raw signed student identity payloads in URLs;
+- internal PrymeStudy mapping identifiers;
+- reusable authentication grants.
+
+The browser receives only the minimum short-lived data required to complete the approved handoff.
 
 ---
 
-## Academic mapping
+## Identity contract
 
-Partners should send their own stable external codes — **not PrymeStudy database IDs**.
+Every partner identity must include a stable immutable external subject.
 
-Example partner claims:
+Example:
 
 ```json
 {
@@ -131,276 +209,355 @@ Example partner claims:
   "level": "300",
   "institution": "LASUSTECH",
   "department": "COMPUTER_SCIENCE",
-  "programme": "COMPUTER_SCIENCE"
+  "programme": "BSC_COMPUTER_SCIENCE"
 }
 ```
 
-PrymeStudy resolves those values to its canonical academic structure.
+`sub` is the partner-controlled immutable identity key. Email addresses, phone numbers, surnames, matric display formats and academic level can change without changing the external subject.
 
-```text
-Partner code                  PrymeStudy record
-────────────────────────────────────────────────────────
-LASUSTECH                  →  Institution
-COMPUTER_SCIENCE           →  Department
-COMPUTER_SCIENCE           →  Programme
-300                        →  Level / cohort
-```
-
-This keeps integrations portable and prevents partners from depending on internal PrymeStudy primary keys.
+Automatic account linking must never rely on name matching alone.
 
 ---
 
 ## Identity lifecycle
 
-Connect supports three primary identity paths.
+Connect supports three identity paths.
 
-### Returning student
+### Existing external identity
 
-If the partner's immutable external subject is already linked to a PrymeStudy user, the student can proceed directly into PrymeStudy.
+When `(integration, external subject)` is already linked, Connect resolves the same PrymeStudy account and records the new activity.
 
 ### Existing PrymeStudy account
 
-If a strong candidate already exists, PrymeStudy follows its account-ownership verification policy before creating the permanent link.
+A strong candidate may be detected from approved identifiers such as institution + normalized matric number or a verified email address. Account ownership must be confirmed whenever ambiguity or account-takeover risk exists.
 
-A matching name is **never** enough to link accounts automatically.
+### New PrymeStudy account
 
-### New student
+When no safe candidate exists, PrymeStudy can provision the user from approved partner claims and establish the external identity link in the same logical transaction.
 
-If no safe existing account exists, PrymeStudy may provision a new account from approved partner claims and create the external identity link as part of the same logical flow.
+Institution-controlled academic fields and user-controlled profile fields remain governed by explicit field-authority rules.
 
 ---
 
-## What this repository will contain
+## Supported languages
 
-This repository is intentionally limited to the **public integration surface**.
+PrymeStudy Connect is **language-agnostic at the protocol level**. Any secure server-side application capable of HTTPS and the required cryptographic operations can integrate with Connect.
+
+Official integration languages are:
+
+| Language / runtime | Primary use |
+|---|---|
+| **PHP / Laravel** | University portals, departmental systems, Laravel applications and traditional PHP backends |
+| **TypeScript / Node.js** | Node.js, Express, NestJS, Fastify, Next.js server runtimes and modern portal backends |
+| **Python** | Django, Flask, FastAPI, research/institutional systems and automation services |
+| **Raw HTTPS** | Java, .NET, Go, Ruby, Rust and any other backend using the published protocol |
+
+### Server-side only
+
+PrymeStudy Connect credentials and signing keys belong on trusted backends.
+
+A React, Vue, Angular, mobile or browser client may call its own backend, but it must never embed a Connect client secret or private signing key.
+
+---
+
+## Repository layout
+
+This repository contains the public integration contract, SDKs, examples, schemas and security guidance for PrymeStudy Connect.
 
 ```text
 prymestudy-connect/
 ├── README.md
+├── LICENSE
+├── SECURITY.md
+├── CONTRIBUTING.md
 ├── docs/
 │   ├── getting-started.md
+│   ├── concepts.md
 │   ├── authentication.md
-│   ├── sso-flow.md
-│   ├── account-linking.md
+│   ├── sso.md
+│   ├── sis-integration.md
 │   ├── academic-mapping.md
-│   ├── security.md
-│   └── errors.md
+│   ├── webhooks.md
+│   ├── environments.md
+│   ├── errors.md
+│   └── security.md
 ├── sdk/
 │   ├── php/
-│   ├── javascript/
+│   ├── typescript/
 │   └── python/
-└── examples/
-    ├── laravel/
-    ├── node/
-    └── php/
+├── examples/
+│   ├── laravel/
+│   ├── node/
+│   ├── python/
+│   └── raw-http/
+└── schemas/
+    ├── launch-request.schema.json
+    ├── academic-claims.schema.json
+    └── webhook.schema.json
 ```
 
-### Public / open-source surface
-
-- partner-safe protocol documentation;
-- SDK source code;
-- request-signing clients;
-- timestamp and nonce handling;
-- request submission helpers;
-- launch/redirect helpers;
-- error normalization;
-- sandbox examples;
-- migration and integration guides.
-
-### Kept private inside PrymeStudy
-
-- internal account-matching heuristics;
-- anti-abuse and fraud controls;
-- private authentication/session implementation;
-- production credentials and secrets;
-- internal operations/admin tooling;
-- security controls whose disclosure would materially weaken the platform.
-
-Open integration does **not** mean exposing PrymeStudy's security authority.
+The public protocol is the source of truth. SDKs implement that protocol consistently rather than defining separate language-specific behavior.
 
 ---
 
-## SDK roadmap
+## Integration environments
 
-> **Status:** Public developer foundation. SDK packages are not yet published.
+Every integration is isolated by environment.
 
-The intended developer experience is:
+```text
+Sandbox / Test
+├── separate credentials
+├── test callbacks
+├── test mappings
+├── test webhooks
+└── non-production data policy
 
-### PHP / Laravel
-
-```bash
-composer require prymestudy/connect
+Production / Live
+├── production credentials
+├── approved callbacks
+├── production mappings
+├── production webhooks
+└── production security policy
 ```
 
-```php
-use PrymeStudy\Connect\PrymeStudy;
+Test credentials must never authenticate against production resources.
 
-return PrymeStudy::launch([
-    'subject' => (string) $student->connect_subject,
-    'email' => $student->email,
-    'first_name' => $student->first_name,
-    'last_name' => $student->last_name,
-    'matric_number' => $student->matric_number,
-    'level' => $student->level,
-    'institution' => 'LASUSTECH',
-    'department' => 'COMPUTER_SCIENCE',
-    'programme' => 'COMPUTER_SCIENCE',
-]);
-```
-
-### Node.js / TypeScript
-
-Planned package:
-
-```bash
-npm install @prymestudy/connect
-```
-
-The package is intended for **trusted server-side Node environments**. Partner secrets must never be shipped to browser JavaScript.
-
-### Python
-
-Planned package:
-
-```bash
-pip install prymestudy-connect
-```
-
-The initial implementation priority is the PHP/Laravel SDK, followed by Node and Python clients.
+Production access is permission-controlled, reviewable, revocable and auditable.
 
 ---
 
-## Credentials
+## Credential model
 
-Approved integrations will receive environment-specific credentials conceptually similar to:
+Each external application or system receives its own identity and credentials.
 
-```env
-PRYMESTUDY_CONNECT_CLIENT_ID=ps_test_...
-PRYMESTUDY_CONNECT_CLIENT_SECRET=ps_test_secret_...
-PRYMESTUDY_CONNECT_ENVIRONMENT=sandbox
+Do not share one credential across unrelated portals, departments, SIS instances or applications.
+
+Example isolation:
+
+```text
+LASUSTECH
+├── Central SIS Production
+├── Central SIS Sandbox
+├── NAMSSN Portal
+├── Computer Science Portal
+└── Engineering Portal
 ```
 
-Production credentials are separate from sandbox credentials.
+A compromised integration can therefore be disabled or rotated without disabling every other LASUSTECH connection.
 
-Never commit credentials to source control.
+Credentials support revocation, rotation, expiry and environment separation.
+
+For high-assurance production integrations, asymmetric request signing is the preferred trust model so the partner's private signing key never needs to be stored by PrymeStudy.
+
+Shared-secret/HMAC authentication can be supported where appropriate under an explicitly defined compatibility profile, with strict replay protection and key rotation.
 
 ---
 
-## Security model
+## Security baseline
 
-PrymeStudy Connect is designed around a server-to-server trust boundary.
+PrymeStudy Connect is designed around least privilege, tenant isolation, strong server-to-server authentication and complete security auditability.
 
-Core requirements include:
+Security requirements include:
 
-- HTTPS in production;
-- server-side credential usage only;
-- short-lived requests and launches;
-- timestamp validation;
+- HTTPS/TLS for all production traffic;
+- cryptographically secure integration credentials;
+- asymmetric request signing for high-assurance integrations;
+- short-lived signed requests;
+- timestamp validation and bounded clock skew;
 - nonce/JTI replay prevention;
 - one-time launch consumption;
-- strict callback/return URL allow-listing;
-- rate limiting;
-- credential rotation and revocation;
-- auditability of sensitive integration actions;
+- strict audience and integration binding;
+- exact callback and return URL allow-lists;
+- request-body and payload limits;
+- schema and claim validation;
+- scoped API authorization;
+- institution and integration isolation;
+- rate limiting and abuse controls;
+- idempotency for mutation and event workflows;
+- credential expiry, rotation and revocation;
+- secret values displayed only when policy permits and never logged;
+- private keys, secrets, OTPs and full authentication tokens excluded from logs;
 - explicit ownership verification for account linking;
-- no secrets in browser code, query strings, logs, or analytics;
-- no automatic linking based on a student's name.
+- no automatic identity linking by name;
+- signed webhook delivery and verification;
+- security-event and administrative audit trails;
+- step-up authentication for sensitive administrative actions;
+- production enablement controlled independently from sandbox access.
 
-Partners should create a separate integration/client for each external system rather than sharing one credential across unrelated applications.
-
----
-
-## PrymeStudy Connect vs Institutional Connect
-
-PrymeStudy has two related but different integration concerns.
-
-| | PrymeStudy Connect | Institutional Connect |
-|---|---|---|
-| Primary purpose | Student identity + SSO | System-to-system academic data exchange |
-| Typical action | “Open PrymeStudy” | Sync students, courses, enrolments or attendance |
-| Trust model | Signed launch + identity linking | Scoped API clients + webhooks |
-| Browser involved | Only for final one-time launch consumption | Usually no |
-| Partner secret in browser | Never | Never |
-
-They can coexist in the same institution without being the same protocol.
-
----
-
-## Reference implementation
-
-The first reference integration is planned around a LASUSTECH departmental/student portal use case.
-
-The reusable Connect core must remain institution-agnostic: no LASUSTECH-, department-, or association-specific assumptions should be embedded into the generic SDK or protocol.
-
-A Computer Science portal, Mathematics portal, another LASUSTECH department, or another university should be able to integrate through configuration rather than a new Connect implementation.
+Enterprise deployments can layer controls such as IP allow-listing, mTLS, enterprise federation and institution-specific policy where required.
 
 ---
 
 ## Enterprise federation
 
-PrymeStudy Connect is intended to provide a practical integration path for partners that do not run a full identity-provider stack.
+PrymeStudy Connect supports institutions at different levels of identity maturity.
 
-It is **not** intended to replace industry federation standards.
+The Connect partner-launch protocol gives institutions without a full identity-provider stack a secure integration path.
 
-Future enterprise integrations may support standards such as:
+Where an institution already operates enterprise identity infrastructure, Connect can interoperate through standard federation patterns including:
 
 - OpenID Connect;
-- OAuth-based institutional federation where appropriate;
-- SAML 2.0.
+- OAuth-based service authorization;
+- SAML 2.0;
+- institution-managed public keys and certificate-based trust;
+- mTLS for high-assurance system-to-system deployments.
+
+Connect does not require an institution to abandon an existing identity provider, SIS or LMS.
 
 ---
 
-## Project status
+## SIS / API trust model
 
-This repository currently represents the public developer foundation for PrymeStudy Connect.
+SSO capability does not automatically grant academic-data write access.
 
-Planned milestones:
+An integration may be approved for one capability and denied another.
 
-1. publish partner-safe protocol documentation;
-2. ship the PHP/Laravel reference SDK;
-3. provide a working Laravel example integration;
-4. publish sandbox onboarding documentation;
-5. ship Node.js support;
-6. ship Python support;
-7. version and release the public protocol/SDKs;
-8. expand enterprise federation support when required.
+Example:
 
-Do not treat unreleased package names shown in this README as currently available packages.
+```text
+Computer Science Portal
+├── connect:sso.launch       ✓
+├── students:read            ✓
+├── students:write           ✗
+├── enrollments:read         ✓
+├── enrollments:write        ✗
+└── webhooks:manage          ✓
+```
+
+This separation prevents identity federation from becoming unrestricted institutional-data access.
+
+---
+
+## Webhook security
+
+Webhook consumers must treat every delivery as untrusted until verified.
+
+A valid consumer implementation should:
+
+1. verify the PrymeStudy signature using the configured verification key or secret;
+2. validate the event timestamp;
+3. reject replayed delivery identifiers;
+4. enforce payload-size limits;
+5. process idempotently;
+6. return a bounded response time;
+7. avoid logging sensitive payloads unnecessarily.
+
+PrymeStudy may retry eligible events according to the published delivery policy.
+
+---
+
+## Open-source boundary
+
+PrymeStudy Connect is open at the integration layer so institutions can inspect, audit and implement the protocol without depending on hidden client behavior.
+
+### Public / open-source
+
+- integration protocol documentation;
+- SDK source code;
+- schemas and data contracts;
+- signing and verification clients;
+- nonce/JTI and timestamp handling;
+- request and response models;
+- webhook verification;
+- error catalogue;
+- sandbox/reference examples;
+- compatibility and migration guidance;
+- secure implementation guidance.
+
+### Private PrymeStudy security authority
+
+- account-matching heuristics;
+- anti-abuse and fraud systems;
+- risk scoring;
+- internal authentication/session implementation;
+- internal production infrastructure;
+- production secrets and signing material;
+- private administrative/support tooling;
+- sensitive operational security controls;
+- controls whose disclosure would materially weaken the platform.
+
+Open source means the integration contract is inspectable and interoperable. It does not expose PrymeStudy's private security authority.
+
+---
+
+## Reference architecture
+
+The reference institutional model supports department-level, association-level and institution-wide deployments without changing the Connect protocol.
+
+Example:
+
+```text
+LASUSTECH
+│
+├── Central SIS
+├── Central Student Portal
+├── NAMSSN Portal
+├── Computer Science Portal
+└── Other approved systems
+        │
+        ▼
+  PrymeStudy Connect
+        │
+        ▼
+     PrymeStudy
+```
+
+NAMSSN/LASUSTECH serves as a reference integration use case, not as a hard-coded assumption in the protocol or SDKs.
+
+A second department, another institution or a different SIS should integrate through configuration, credentials, scopes and mappings rather than a separate PrymeStudy-specific implementation.
+
+---
+
+## Operational principles
+
+PrymeStudy Connect follows these platform rules:
+
+1. **One integration, one security identity.** Never reuse credentials across unrelated systems.
+2. **Least privilege by default.** Every API, webhook and identity capability is explicitly scoped.
+3. **No secrets in browsers.** Connect authentication is server-side.
+4. **No raw PII in redirect URLs.** Browser handoffs use opaque, short-lived launch material.
+5. **No silent account takeover.** Existing-account linking requires strong evidence and verification where needed.
+6. **Canonical academic mapping.** Partners send stable external codes, not PrymeStudy database IDs.
+7. **Environment isolation.** Test and production trust are separate.
+8. **Audit everything sensitive.** Credential, mapping, identity and production-access changes are attributable.
+9. **Standards where standards fit.** OIDC/OAuth/SAML and strong cryptographic primitives are preferred over proprietary alternatives when appropriate.
+10. **Protocol before SDK.** Language SDKs implement the same stable Connect contract.
 
 ---
 
 ## Contributing
 
-PrymeStudy Connect is intended to be developed in the open at the SDK and protocol layer.
+Contributions to the public protocol, SDKs, schemas, examples and documentation must preserve the PrymeStudy Connect security model.
 
-Before opening a contribution:
+Do not include:
 
-- do not include production credentials or student data;
-- do not copy private PrymeStudy server implementation into this repository;
-- keep examples institution-agnostic unless they are explicitly marked as reference examples;
-- preserve the server-side secret boundary;
-- include tests for signing, validation, replay protection, and error handling when relevant.
+- production credentials;
+- real student records;
+- private PrymeStudy server implementation;
+- internal anti-abuse logic;
+- secrets or private keys;
+- examples that teach unsafe browser-side credential handling.
 
-A fuller contribution guide will be added as the first SDK implementation lands.
+Security-sensitive changes should include tests for signing, verification, replay protection, idempotency, scope enforcement and error handling where applicable.
 
 ---
 
 ## Security disclosures
 
-Please do **not** publish suspected vulnerabilities, credentials, student information, or exploit details in a public issue.
+Do **not** disclose suspected vulnerabilities, credentials, private keys, student information or exploit details in a public issue.
 
-A dedicated security policy and private reporting path will be published before the first production SDK release.
+Security reports should use PrymeStudy's private security reporting channel defined in `SECURITY.md`.
 
 ---
 
 ## About PrymeStudy
 
-[PrymeStudy](https://prymestudy.com) is building a connected academic platform for students and institutions — bringing academic structure, learning tools, institutional workflows, and intelligent study experiences into one system.
+[PrymeStudy](https://prymestudy.com) is building a connected academic platform for students and institutions — combining academic infrastructure, learning, institutional operations and intelligent study experiences in one ecosystem.
 
-PrymeStudy Connect is the integration layer that lets existing academic portals connect into that ecosystem without surrendering their own authentication authority.
+PrymeStudy Connect is the enterprise integration layer that allows existing academic systems to participate in that ecosystem without surrendering their own infrastructure or security authority.
 
 ---
 
 <p align="center">
-  <strong>Build once. Connect departments, institutions, and academic communities to PrymeStudy securely.</strong>
+  <strong>One secure integration layer for institutions, academic systems and the PrymeStudy ecosystem.</strong>
 </p>
