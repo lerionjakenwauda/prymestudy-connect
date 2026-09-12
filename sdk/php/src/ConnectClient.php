@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PrymeStudy\Connect;
 
-use Firebase\JWT\JWT;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
@@ -26,20 +25,37 @@ final class ConnectClient
         ]);
     }
 
-    /**
-     * Create a one-time PrymeStudy SSO launch.
-     *
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>
-     */
+    /** @param array<string, mixed> $payload @return array<string, mixed> */
     public function createLaunch(array $payload, ?string $idempotencyKey = null): array
     {
-        return $this->request(
-            method: 'POST',
-            path: '/connect/v1/launches',
-            body: $payload,
-            idempotencyKey: $idempotencyKey ?? self::randomIdempotencyKey(),
-        );
+        return $this->request('POST', '/connect/v1/launches', $payload, $idempotencyKey ?? self::randomIdempotencyKey());
+    }
+
+    /** @param list<array<string, mixed>> $students @return array<string, mixed> */
+    public function upsertStudents(array $students, ?string $idempotencyKey = null): array
+    {
+        return $this->request('POST', '/connect/v1/students:upsert', ['items' => $students], $idempotencyKey ?? self::randomIdempotencyKey());
+    }
+
+    /** @param list<array<string, mixed>> $courses @return array<string, mixed> */
+    public function upsertCourses(array $courses, ?string $idempotencyKey = null): array
+    {
+        return $this->request('POST', '/connect/v1/courses:upsert', ['items' => $courses], $idempotencyKey ?? self::randomIdempotencyKey());
+    }
+
+    /** @param list<array<string, mixed>> $enrollments @return array<string, mixed> */
+    public function upsertEnrollments(array $enrollments, ?string $idempotencyKey = null): array
+    {
+        return $this->request('POST', '/connect/v1/enrollments:upsert', ['items' => $enrollments], $idempotencyKey ?? self::randomIdempotencyKey());
+    }
+
+    /** @return array<string, mixed> */
+    public function getSyncJob(string $jobId): array
+    {
+        if ($jobId === '' || str_contains($jobId, '/')) {
+            throw new \InvalidArgumentException('jobId must be a non-empty opaque identifier.');
+        }
+        return $this->request('GET', '/connect/v1/sync-jobs/'.rawurlencode($jobId));
     }
 
     /**
@@ -54,14 +70,16 @@ final class ConnectClient
         ?array $body = null,
         ?string $idempotencyKey = null,
     ): array {
-        $url = rtrim($this->config->apiBaseUrl, '/') . '/' . ltrim($path, '/');
+        if (! str_starts_with($path, '/')) {
+            throw new \InvalidArgumentException('Connect API paths must start with /.');
+        }
 
+        $url = rtrim($this->config->apiBaseUrl, '/').'/'.ltrim($path, '/');
         $headers = [
             'Accept' => 'application/json',
-            'Authorization' => 'Bearer ' . $this->accessToken(),
-            'User-Agent' => 'prymestudy-connect-php/1',
+            'Authorization' => 'Bearer '.$this->accessToken(),
+            'User-Agent' => 'prymestudy-connect-php/1.0',
         ];
-
         if ($idempotencyKey !== null) {
             $headers['Idempotency-Key'] = $idempotencyKey;
         }
@@ -74,11 +92,7 @@ final class ConnectClient
         try {
             $response = $this->http->request(strtoupper($method), $url, $options);
         } catch (GuzzleException $e) {
-            throw new ConnectException(
-                message: 'Unable to reach PrymeStudy Connect.',
-                errorCode: 'transport_error',
-                previous: $e,
-            );
+            throw new ConnectException('Unable to reach PrymeStudy Connect.', 'transport_error', previous: $e);
         }
 
         return $this->decodeResponse($response);
@@ -93,7 +107,6 @@ final class ConnectClient
     private function accessToken(): string
     {
         $now = time();
-
         if ($this->accessToken !== null && $this->accessTokenExpiresAt > ($now + 30)) {
             return $this->accessToken;
         }
@@ -105,7 +118,6 @@ final class ConnectClient
             'client_assertion_type' => 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
             'client_assertion' => $assertion,
         ];
-
         if ($this->config->scopes !== []) {
             $form['scope'] = implode(' ', $this->config->scopes);
         }
@@ -114,54 +126,37 @@ final class ConnectClient
             $response = $this->http->request('POST', $this->config->tokenEndpoint, [
                 'headers' => [
                     'Accept' => 'application/json',
-                    'User-Agent' => 'prymestudy-connect-php/1',
+                    'User-Agent' => 'prymestudy-connect-php/1.0',
                 ],
                 'form_params' => $form,
             ]);
         } catch (GuzzleException $e) {
-            throw new ConnectException(
-                message: 'Unable to reach the PrymeStudy authorization server.',
-                errorCode: 'token_transport_error',
-                previous: $e,
-            );
+            throw new ConnectException('Unable to reach the PrymeStudy authorization server.', 'token_transport_error', previous: $e);
         }
 
         $data = $this->decodeResponse($response);
         $token = $data['access_token'] ?? null;
         $expiresIn = $data['expires_in'] ?? null;
-
         if (! is_string($token) || $token === '') {
-            throw new ConnectException(
-                message: 'Token response did not contain a valid access_token.',
-                errorCode: 'invalid_token_response',
-                statusCode: $response->getStatusCode(),
-            );
+            throw new ConnectException('Token response did not contain a valid access_token.', 'invalid_token_response', statusCode: $response->getStatusCode());
         }
 
         $ttl = is_int($expiresIn) || is_numeric($expiresIn) ? max(1, (int) $expiresIn) : 300;
         $this->accessToken = $token;
         $this->accessTokenExpiresAt = $now + $ttl;
-
         return $token;
     }
 
     private function clientAssertion(int $now): string
     {
-        $payload = [
+        return Es256Signer::jwt([
             'iss' => $this->config->clientId,
             'sub' => $this->config->clientId,
             'aud' => $this->config->tokenEndpoint,
             'iat' => $now,
             'exp' => $now + $this->config->assertionTtlSeconds,
-            'jti' => bin2hex(random_bytes(24)),
-        ];
-
-        return JWT::encode(
-            payload: $payload,
-            key: $this->config->privateKey,
-            alg: $this->config->algorithm,
-            keyId: $this->config->keyId,
-        );
+            'jti' => 'jti_'.bin2hex(random_bytes(24)),
+        ], $this->config->privateKey, $this->config->keyId);
     }
 
     /** @return array<string, mixed> */
@@ -171,21 +166,15 @@ final class ConnectClient
         $decoded = $raw === '' ? [] : json_decode($raw, true);
         $data = is_array($decoded) ? $decoded : [];
         $status = $response->getStatusCode();
-
         if ($status >= 200 && $status < 300) {
             return $data;
         }
 
         $error = isset($data['error']) && is_array($data['error']) ? $data['error'] : [];
-
         throw new ConnectException(
-            message: is_string($error['message'] ?? null)
-                ? $error['message']
-                : sprintf('PrymeStudy Connect returned HTTP %d.', $status),
+            message: is_string($error['message'] ?? null) ? $error['message'] : sprintf('PrymeStudy Connect returned HTTP %d.', $status),
             errorCode: is_string($error['code'] ?? null) ? $error['code'] : 'connect_error',
-            requestId: is_string($error['request_id'] ?? null)
-                ? $error['request_id']
-                : $response->getHeaderLine('X-Request-Id') ?: null,
+            requestId: is_string($error['request_id'] ?? null) ? $error['request_id'] : ($response->getHeaderLine('X-Request-Id') ?: null),
             statusCode: $status,
             details: is_array($error['details'] ?? null) ? $error['details'] : [],
         );
@@ -193,6 +182,6 @@ final class ConnectClient
 
     private static function randomIdempotencyKey(): string
     {
-        return 'idem_' . bin2hex(random_bytes(18));
+        return 'idem_'.bin2hex(random_bytes(18));
     }
 }
