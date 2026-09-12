@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  schemas:
-    name: Protocol schemas
+  protocol:
+    name: Protocol and schemas
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +22,11 @@ jobs:
           python -m json.tool schemas/academic-claims.schema.json >/dev/null
           python -m json.tool schemas/launch-request.schema.json >/dev/null
           python -m json.tool schemas/webhook-event.schema.json >/dev/null
-      - name: Validate JSON Schema metaschemas
+      - name: Validate JSON Schema metaschemas and OpenAPI
         run: |
-          python -m pip install --disable-pip-version-check check-jsonschema
+          python -m pip install --disable-pip-version-check check-jsonschema openapi-spec-validator
           check-jsonschema --check-metaschema schemas/*.json
+          openapi-spec-validator openapi/connect-v1.yaml
 
   php:
     name: PHP SDK
@@ -44,7 +45,10 @@ jobs:
         working-directory: sdk/php
         run: composer install --no-interaction --no-progress --prefer-dist
       - name: PHP syntax
-        run: find sdk/php/src -name '*.php' -print0 | xargs -0 -n1 php -l
+        run: find sdk/php/src sdk/php/tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Tests
+        working-directory: sdk/php
+        run: composer test
 
   typescript:
     name: TypeScript SDK
@@ -53,18 +57,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: sdk/typescript/package.json
+          node-version: "22"
       - name: Install dependencies
         working-directory: sdk/typescript
         run: npm install --no-audit --no-fund
       - name: Typecheck
         working-directory: sdk/typescript
         run: npm run typecheck
-      - name: Build
+      - name: Tests and build
         working-directory: sdk/typescript
-        run: npm run build
+        run: npm test
 
   python:
     name: Python SDK
@@ -74,9 +76,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: sdk/python/pyproject.toml
       - name: Install SDK
         run: python -m pip install --disable-pip-version-check ./sdk/python
       - name: Compile package
         run: python -m compileall -q sdk/python/prymestudy_connect
+      - name: Tests
+        run: python -m unittest discover -s sdk/python/tests -v
