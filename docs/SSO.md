@@ -2,36 +2,48 @@
 
 ## Goal
 
-Partner SSO lets a user who has already authenticated to an approved institutional portal enter PrymeStudy without repeating registration or sign-in.
+Partner SSO lets a user who has already authenticated to an approved institutional portal enter PrymeStudy without repeating an unsafe duplicate registration flow.
 
 Connect does not share partner cookies, passwords or raw authentication tokens with PrymeStudy.
+
+The browser identity handoff belongs to the central PrymeStudy Identity surface:
+
+```text
+auth.prymestudy.com
+```
+
+Academic/product authorization remains with the PrymeStudy platform.
 
 ## Flow
 
 ```text
 User authenticated in partner portal
         ↓
-Partner backend requests Connect launch
+Partner backend authenticates integration with PrymeStudy Identity
         ↓
-Connect authenticates the integration
+auth.prymestudy.com issues short-lived scoped Connect token
         ↓
-Connect validates claims + academic mappings
+Partner backend requests a Connect launch from prymestudy.com
         ↓
-PrymeStudy resolves/creates/links identity
+Platform validates scope + institution + academic mappings
         ↓
-Connect returns one-time launch URL
+Platform resolves the external identity state
         ↓
-Browser follows opaque launch URL
+One-time Identity launch URL returned
         ↓
-PrymeStudy consumes launch exactly once
+Browser follows https://auth.prymestudy.com/connect/launch/...
         ↓
-Normal PrymeStudy session is established
+PrymeStudy Identity resolves/provisions/verifies the human identity
+        ↓
+One-time launch consumed exactly once
+        ↓
+Browser returns to the approved PrymeStudy product destination
 ```
 
 ## Launch endpoint
 
 ```http
-POST /connect/v1/launches
+POST https://prymestudy.com/connect/v1/launches
 ```
 
 The caller must hold the `connect:sso.launch` scope.
@@ -42,23 +54,23 @@ Example:
 
 ```json
 {
-  "external_subject": "0b8a17e9-5d69-46e8-96e6-a0a7a71dfc3b",
   "identity": {
+    "sub": "0b8a17e9-5d69-46e8-96e6-a0a7a71dfc3b",
     "first_name": "Ada",
     "last_name": "Student",
     "email": "ada.student@example.edu",
-    "email_verified_by_partner": true,
+    "email_verified": true,
     "matric_number": "EXU/2026/001"
   },
   "academic": {
     "institution": "EXAMPLE_UNIVERSITY",
-    "division": "SCIENCE",
+    "college": "SCIENCE",
     "department": "COMPUTING",
     "programme": "BSC_COMPUTING",
     "level": "300"
   },
-  "return_url": "https://prymestudy.com/study-room",
-  "correlation_id": "partner-request-7d9301"
+  "return_url": "https://app.prymestudy.com/dashboard",
+  "state": "partner-correlation-value"
 }
 ```
 
@@ -66,7 +78,7 @@ The full machine contract is defined by `schemas/launch-request.schema.json`.
 
 ## External subject
 
-`external_subject` is required and must be:
+`identity.sub` is required and must be:
 
 - stable over the lifetime of the partner account;
 - unique within that integration;
@@ -79,7 +91,7 @@ Sequential database IDs should not be exposed unless the partner has explicitly 
 
 ## Field authority
 
-Connect distinguishes identity/academic fields by authority.
+Connect distinguishes identity and academic fields by authority.
 
 A verified institutional integration may be authoritative for fields such as:
 
@@ -102,7 +114,7 @@ Partner-provided email becomes trusted only according to the integration's email
 If the tuple below already exists:
 
 ```text
-(integration_id, external_subject)
+(integration_id, identity.sub)
 ```
 
 Connect resolves the same PrymeStudy account.
@@ -117,21 +129,43 @@ A candidate is not automatically proof of ownership.
 
 Names are never sufficient to auto-link an account.
 
-Where ownership is uncertain, PrymeStudy performs an account-verification flow before creating the permanent external link.
+Where ownership is uncertain, the user remains on `auth.prymestudy.com` and completes account ownership verification before PrymeStudy creates the permanent external link.
 
 ## New account
 
-If no safe candidate exists, PrymeStudy may provision a new account using the approved claims and academic mappings.
+If no safe candidate exists, PrymeStudy may provision a canonical PrymeStudy identity using the approved claims and academic mappings.
 
-Identity linking and provisioning should be performed atomically where practical so a partially completed transaction cannot create duplicate links.
+Identity linking and provisioning are performed atomically where practical so a partially completed transaction cannot create duplicate links.
+
+Creating or proving an identity does not itself grant institution administration, course enrolment, billing entitlement or other product permissions.
+
+## Launch response
+
+Example:
+
+```json
+{
+  "launch_id": "<launch-id>",
+  "launch_url": "https://auth.prymestudy.com/connect/launch/psl_...",
+  "expires_at": "2026-09-13T15:00:00Z"
+}
+```
+
+The partner redirects the browser to `launch_url` exactly as returned. The partner must not reconstruct or modify it.
 
 ## Return URL security
 
-`return_url` is optional and must match an allowed destination policy.
+`return_url` is optional and must be an exact allow-listed PrymeStudy first-party destination for the integration.
 
-PrymeStudy must not perform arbitrary open redirects.
+PrymeStudy does not perform arbitrary open redirects.
 
-Allowed return destinations are configured per integration or resolved to PrymeStudy-owned route identifiers.
+Typical destination:
+
+```text
+https://app.prymestudy.com/dashboard
+```
+
+Institution-specific first-party destinations can be used only when they are trusted and explicitly allow-listed for the integration.
 
 ## One-time launch security
 
@@ -141,11 +175,11 @@ Launch credentials are:
 - short-lived;
 - single use;
 - securely generated;
-- stored/compared in a way that avoids unnecessary plaintext persistence;
-- bound to the integration and resolved identity;
+- stored/compared without unnecessary plaintext persistence;
+- bound to the integration and resolved identity state;
 - invalid after success, expiry or policy revocation.
 
-The browser must not receive raw identity JSON or partner credentials in the URL.
+The browser never receives raw identity JSON, machine access tokens, client assertions or partner private keys in the URL.
 
 ## Failure behavior
 
@@ -160,4 +194,4 @@ Connect fails closed when:
 - identity linkage is ambiguous and cannot be safely resolved;
 - environment policy is violated.
 
-Partner-visible errors should be actionable without disclosing sensitive security details.
+Partner-visible errors are actionable without disclosing sensitive security details.
