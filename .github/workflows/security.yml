@@ -1,0 +1,89 @@
+name: Connect Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: connect-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  credential-guard:
+    name: Credential guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/security_scan.py
+
+  php-audit:
+    name: PHP dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer:v2
+          coverage: none
+      - name: Install PHP SDK dependencies
+        working-directory: sdk/php
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Audit PHP dependencies
+        working-directory: sdk/php
+        run: composer audit --no-interaction
+
+  node-audit:
+    name: Node dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdk/typescript
+        run: npm install --no-fund
+      - name: Audit Node dependencies
+        working-directory: sdk/typescript
+        run: npm audit --audit-level=high
+
+  python-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package and auditor
+        run: |
+          python -m pip install --disable-pip-version-check ./sdk/python
+          python -m pip install --disable-pip-version-check pip-audit
+      - name: Audit Python environment
+        run: pip-audit --strict
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3
