@@ -21,7 +21,7 @@
   &nbsp;&middot;&nbsp;
   <a href="#security-model">Security</a>
   &nbsp;&middot;&nbsp;
-  <a href="#protocol">Protocol</a>
+  <a href="#protocol-and-endpoints">Protocol</a>
   &nbsp;&middot;&nbsp;
   <a href="SECURITY.md">Report a vulnerability</a>
 </p>
@@ -58,42 +58,81 @@ External academic systems
 
 The partner remains authoritative for the identity or academic data it is explicitly approved to provide. PrymeStudy remains authoritative for PrymeStudy accounts, permissions, sessions, entitlements, canonical academic records and internal security policy.
 
+## PrymeStudy authority boundary
+
+Connect uses the existing central PrymeStudy Identity surface rather than creating a second authentication system.
+
+```text
+auth.prymestudy.com
+  PrymeStudy Identity
+  ├── authenticates Connect integration/service identities
+  ├── issues short-lived scoped Connect access tokens
+  └── owns browser identity handoff/account ownership verification
+
+prymestudy.com/connect/v1
+  PrymeStudy platform authority
+  ├── creates SSO launches
+  ├── applies institution and academic mappings
+  ├── synchronizes SIS/LMS data
+  └── enforces tenant, scope, entitlement and product policy
+```
+
+**Auth proves identity. The PrymeStudy platform decides academic and product authorization.**
+
+Production endpoints:
+
+```text
+Token authority
+https://auth.prymestudy.com/connect/v1/oauth/token
+
+Platform API base
+https://prymestudy.com
+```
+
+A successful SSO launch returns a short-lived browser handoff on:
+
+```text
+https://auth.prymestudy.com/connect/launch/...
+```
+
 ---
 
 ## Capabilities
 
 ### Partner SSO
 
-A user who is already authenticated in an approved partner portal can enter PrymeStudy without creating a second registration flow.
+A user who is already authenticated in an approved partner portal can enter PrymeStudy through a controlled identity handoff.
 
 ```text
 Authenticated partner user
         ↓
+Partner backend authenticates its Connect application
+        ↓
+PrymeStudy Identity issues short-lived scoped access
+        ↓
 Partner backend requests a Connect launch
         ↓
-Integration identity + scope verified
+Institution + academic mapping validated
         ↓
-External identity and academic mapping resolved
+One-time auth.prymestudy.com launch returned
         ↓
-One-time opaque launch created
+PrymeStudy identity resolved / provisioned / verified
         ↓
-PrymeStudy consumes launch exactly once
-        ↓
-Normal PrymeStudy session
+Approved PrymeStudy product destination
 ```
 
-No partner secret or raw student identity payload is placed in the browser redirect URL.
+No partner private key, access token or raw student identity payload is placed in the browser redirect URL.
 
 ### SIS and LMS integration
 
 Scoped APIs and controlled synchronization workflows support institution-approved data domains such as:
 
 - students and institutional identities;
-- academic structures;
+- academic structures and mappings;
 - programmes and levels/cohorts;
 - courses and course offerings;
 - enrolments and registrations;
-- attendance where authorized;
+- synchronization/reconciliation status;
 - other resources exposed by an approved integration scope.
 
 External systems use stable source identifiers and academic codes. They do not depend on PrymeStudy database primary keys.
@@ -102,44 +141,56 @@ External systems use stable source identifiers and academic codes. They do not d
 
 API access is isolated per integration, environment and scope.
 
-Example capability scopes:
+Current Connect v1 capability scopes include:
 
 ```text
 connect:sso.launch
-students:read
 students:write
-courses:read
 courses:write
-enrollments:read
 enrollments:write
-webhooks:manage
+sync:read
 ```
 
 Identity federation never automatically grants academic-data write access.
 
 ### Webhooks
 
-PrymeStudy Connect delivers signed HTTPS events to registered endpoints. Consumers verify the delivery signature, timestamp and content integrity before processing the event and must process duplicate deliveries idempotently.
+PrymeStudy Connect supports signed HTTPS event delivery. Consumers verify signature, key identity, timestamp and content integrity before processing and must handle duplicate deliveries idempotently.
 
 ### Data exchange and reconciliation
 
-Bulk synchronization is designed for bounded batches, stable external identifiers, idempotency, per-record validation, asynchronous processing where necessary and deterministic reconciliation results.
+Bulk synchronization is designed for bounded batches, stable external identifiers, idempotency, per-record validation and deterministic reconciliation through PrymeStudy's canonical institutional data layer.
 
 ---
 
-## Protocol
+## Protocol and endpoints
 
 The public protocol is the source of truth. Official SDKs implement the same protocol rather than defining language-specific behavior.
 
+```text
+POST https://auth.prymestudy.com/connect/v1/oauth/token
+
+POST https://prymestudy.com/connect/v1/launches
+POST https://prymestudy.com/connect/v1/students:upsert
+POST https://prymestudy.com/connect/v1/courses:upsert
+POST https://prymestudy.com/connect/v1/enrollments:upsert
+GET  https://prymestudy.com/connect/v1/sync-jobs/{job_id}
+```
+
 Core documentation:
 
+- [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — integration setup from key creation to production.
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — Connect v1 wire and trust contract.
 - [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) — machine authentication, keys, tokens and rotation.
-- [`docs/SSO.md`](docs/SSO.md) — partner SSO and one-time launch flow.
+- [`docs/SSO.md`](docs/SSO.md) — partner SSO and central Identity handoff.
 - [`docs/SIS_AND_LMS.md`](docs/SIS_AND_LMS.md) — academic synchronization and source authority.
+- [`docs/ACADEMIC_MAPPING.md`](docs/ACADEMIC_MAPPING.md) — external-code to canonical PrymeStudy mapping.
+- [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) — sandbox/production isolation.
+- [`docs/ERRORS.md`](docs/ERRORS.md) — stable machine-readable errors.
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) — signed event delivery and replay handling.
+- [`openapi/connect-v1.yaml`](openapi/connect-v1.yaml) — machine-readable OpenAPI 3.1 contract.
 
-Machine-readable contracts:
+Machine-readable JSON Schemas:
 
 - [`schemas/academic-claims.schema.json`](schemas/academic-claims.schema.json)
 - [`schemas/launch-request.schema.json`](schemas/launch-request.schema.json)
@@ -158,15 +209,15 @@ This repository maintains first-class SDK implementations for:
 | **PHP / Laravel** | [`sdk/php`](sdk/php) | Laravel and PHP institutional backends |
 | **TypeScript / Node.js** | [`sdk/typescript`](sdk/typescript) | Express, NestJS, Fastify, Next.js server runtimes and Node services |
 | **Python** | [`sdk/python`](sdk/python) | Django, Flask, FastAPI and Python services |
-| **Raw HTTPS** | Protocol + schemas | Java, .NET, Go, Ruby, Rust and other backend stacks |
+| **Raw HTTPS** | [`examples/raw-http`](examples/raw-http) | Java, .NET, Go, Ruby, Rust and other backend stacks |
 
 All official SDKs follow the same core behavior:
 
 1. validate integration configuration;
-2. authenticate the integration server-to-server;
+2. authenticate the integration server-to-server through PrymeStudy Identity;
 3. obtain short-lived scoped access;
 4. apply request idempotency where required;
-5. call the versioned Connect API;
+5. call the versioned Connect platform API;
 6. normalize machine-readable errors;
 7. keep credentials and private signing material out of browser/mobile clients.
 
@@ -176,20 +227,18 @@ All official SDKs follow the same core behavior:
 
 High-assurance integrations use asymmetric client authentication.
 
-The partner keeps its private signing key. PrymeStudy stores public verification material and credential metadata.
+The partner keeps its P-256 private signing key. PrymeStudy stores public verification material and credential metadata.
 
-The default machine-authentication profile uses OAuth 2.0 client credentials with a short-lived signed JWT client assertion. Assertions are bound to:
+The production machine-authentication profile uses OAuth client credentials with a short-lived ES256 signed JWT client assertion. Assertions are bound to:
 
 - the registered client ID;
-- the exact token audience;
+- `https://auth.prymestudy.com/connect/v1/oauth/token` as the exact production audience;
 - a short validity window;
 - a unique replay-protected `jti`;
 - an active registered key and key ID;
 - the integration environment.
 
-For high-assurance deployments, mTLS and certificate-bound access can be layered onto the integration policy.
-
-A shared-secret/HMAC compatibility profile may be enabled for approved systems that cannot support asymmetric credentials, but compatibility mode does not weaken scope enforcement, replay protection, environment isolation or callback validation.
+For high-assurance deployments, mTLS and certificate-bound access can be layered onto integration policy.
 
 ---
 
@@ -200,8 +249,8 @@ PrymeStudy Connect is designed around **least privilege, tenant isolation, short
 Security requirements include:
 
 - TLS for all production traffic;
-- separate sandbox and production trust domains;
-- asymmetric production credentials where supported;
+- separate sandbox and production trust;
+- asymmetric production credentials;
 - short-lived client assertions and access tokens;
 - nonce/JTI replay prevention;
 - one-time SSO launch consumption;
@@ -229,7 +278,7 @@ Partners send codes they own:
 ```json
 {
   "institution": "EXAMPLE_UNIVERSITY",
-  "division": "SCIENCE",
+  "college": "SCIENCE",
   "department": "COMPUTING",
   "programme": "BSC_COMPUTING",
   "level": "300"
@@ -238,22 +287,22 @@ Partners send codes they own:
 
 PrymeStudy maps those values to canonical PrymeStudy academic records.
 
-If a required mapping is missing or ambiguous, Connect fails safely. It must never guess an institution, department, programme, level or course.
+If a required mapping is missing or ambiguous, Connect fails safely. It does not guess an institution, department, programme, level or course.
 
 ---
 
 ## Identity contract
 
-Every federated identity has a stable external subject that belongs to the partner integration.
+Every federated identity has a stable external subject owned by the partner integration:
 
 ```json
 {
-  "external_subject": "0b8a17e9-5d69-46e8-96e6-a0a7a71dfc3b",
   "identity": {
+    "sub": "0b8a17e9-5d69-46e8-96e6-a0a7a71dfc3b",
     "first_name": "Ada",
     "last_name": "Student",
     "email": "ada.student@example.edu",
-    "email_verified_by_partner": true,
+    "email_verified": true,
     "matric_number": "EXU/2026/001"
   },
   "academic": {
@@ -265,7 +314,7 @@ Every federated identity has a stable external subject that belongs to the partn
 }
 ```
 
-The external subject remains stable when mutable attributes such as surname, email, phone or academic level change.
+`identity.sub` remains stable when mutable attributes such as surname, email, phone or academic level change.
 
 Account resolution follows this order:
 
@@ -348,15 +397,9 @@ prymestudy-connect/
 ├── SECURITY.md
 ├── CONTRIBUTING.md
 ├── docs/
-│   ├── PROTOCOL.md
-│   ├── AUTHENTICATION.md
-│   ├── SSO.md
-│   ├── SIS_AND_LMS.md
-│   └── WEBHOOKS.md
+├── examples/
+├── openapi/
 ├── schemas/
-│   ├── academic-claims.schema.json
-│   ├── launch-request.schema.json
-│   └── webhook-event.schema.json
 └── sdk/
     ├── php/
     ├── typescript/
