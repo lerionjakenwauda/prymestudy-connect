@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from time import time
 from typing import Any, Mapping, Sequence
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 from uuid import uuid4
 
 import httpx
@@ -40,18 +41,16 @@ class ConnectConfig:
     request_timeout_seconds: float = 15.0
 
     def __post_init__(self) -> None:
-        if not self.client_id:
-            raise ValueError("client_id is required")
+        if not self.client_id or len(self.client_id) > 120:
+            raise ValueError("client_id is required and must not exceed 120 characters")
         if not self.private_key_pem:
             raise ValueError("private_key_pem is required")
-        if not self.key_id:
-            raise ValueError("key_id is required")
+        if not self.key_id or len(self.key_id) > 120 or any(not (char.isalnum() or char in "._-") for char in self.key_id):
+            raise ValueError("key_id must contain only letters, numbers, dot, underscore or hyphen and must not exceed 120 characters")
         if self.algorithm != "ES256":
             raise ValueError("PrymeStudy Connect v1 supports ES256 client assertions")
-        if not self.token_endpoint.startswith(("https://", "http://")):
-            raise ValueError("token_endpoint must be an absolute HTTP(S) URL")
-        if not self.api_base_url.startswith(("https://", "http://")):
-            raise ValueError("api_base_url must be an absolute HTTP(S) URL")
+        _validate_endpoint(self.token_endpoint, "token_endpoint", base_url=False)
+        _validate_endpoint(self.api_base_url, "api_base_url", base_url=True)
         if not 30 <= self.assertion_ttl_seconds <= 300:
             raise ValueError("assertion_ttl_seconds must be between 30 and 300")
         if not 1 <= self.request_timeout_seconds <= 120:
@@ -63,7 +62,10 @@ class ConnectConfig:
 class ConnectClient:
     def __init__(self, config: ConnectConfig, http: httpx.Client | None = None) -> None:
         self.config = config
-        self._http = http or httpx.Client(timeout=config.request_timeout_seconds)
+        self._http = http or httpx.Client(
+            timeout=config.request_timeout_seconds,
+            follow_redirects=False,
+        )
         self._owns_http = http is None
         self._access_token: str | None = None
         self._access_token_expires_at = 0
@@ -139,7 +141,7 @@ class ConnectClient:
             headers["Idempotency-Key"] = idempotency_key
 
         url = urljoin(self.config.api_base_url.rstrip("/") + "/", path.lstrip("/"))
-        kwargs: dict[str, Any] = {"headers": headers}
+        kwargs: dict[str, Any] = {"headers": headers, "follow_redirects": False}
         if json is not None:
             kwargs["json"] = dict(json)
 
@@ -170,6 +172,7 @@ class ConnectClient:
                 self.config.token_endpoint,
                 headers={"Accept": "application/json", "User-Agent": "prymestudy-connect-python/1.0"},
                 data=form,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
             raise ConnectError(str(exc), code="token_transport_error") from exc
@@ -207,6 +210,30 @@ class ConnectClient:
             algorithm="ES256",
             headers={"kid": self.config.key_id, "typ": "JWT"},
         )
+
+
+def _validate_endpoint(value: str, name: str, *, base_url: bool) -> None:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError(f"{name} must be an absolute URL with a host")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError(f"{name} must not contain credentials, a query string or a fragment")
+
+    scheme = parsed.scheme.lower()
+    if scheme != "https" and not (scheme == "http" and _is_loopback_host(parsed.hostname)):
+        raise ValueError(f"{name} must use HTTPS. HTTP is allowed only for loopback development hosts")
+    if base_url and parsed.path not in ("", "/"):
+        raise ValueError(f"{name} must be an origin/base URL without a path")
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    host = hostname.strip("[]").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _decode_response(response: httpx.Response) -> dict[str, Any]:
