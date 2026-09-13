@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import httpx
 import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 
 class ConnectError(RuntimeError):
@@ -51,6 +53,7 @@ class ConnectConfig:
             raise ValueError("PrymeStudy Connect v1 supports ES256 client assertions")
         _validate_endpoint(self.token_endpoint, "token_endpoint", base_url=False)
         _validate_endpoint(self.api_base_url, "api_base_url", base_url=True)
+        _validate_p256_private_key(self.private_key_pem)
         if not 30 <= self.assertion_ttl_seconds <= 300:
             raise ValueError("assertion_ttl_seconds must be between 30 and 300")
         if not 1 <= self.request_timeout_seconds <= 120:
@@ -210,6 +213,15 @@ class ConnectClient:
             algorithm="ES256",
             headers={"kid": self.config.key_id, "typ": "JWT"},
         )
+
+
+def _validate_p256_private_key(private_key_pem: str) -> None:
+    try:
+        key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("private_key_pem must contain an EC P-256 private key") from exc
+    if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
+        raise ValueError("private_key_pem must contain an EC P-256 private key")
 
 
 def _validate_endpoint(value: str, name: str, *, base_url: bool) -> None:
