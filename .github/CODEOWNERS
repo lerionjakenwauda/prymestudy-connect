@@ -1,0 +1,8 @@
+# PrymeStudy Connect security and protocol changes require maintainer review.
+* @joseph724-Fk
+
+/openapi/ @joseph724-Fk
+/schemas/ @joseph724-Fk
+/sdk/ @joseph724-Fk
+/.github/workflows/ @joseph724-Fk
+/SECURITY.md @joseph724-Fk
