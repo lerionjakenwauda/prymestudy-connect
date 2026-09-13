@@ -1,6 +1,5 @@
 {
   "name": "prymestudy/connect",
-  "version": "1.0.0",
   "description": "Official PHP SDK for PrymeStudy Connect institutional integrations.",
   "type": "library",
   "license": "Apache-2.0",
