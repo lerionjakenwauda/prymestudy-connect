@@ -1,0 +1,115 @@
+name: Connect Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build and publish release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer:v2
+          coverage: none
+
+      - name: Resolve and verify release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          NODE_VERSION="$(node -p "require('./sdk/typescript/package.json').version")"
+          PYTHON_VERSION="$(python - <<'PY'
+          import pathlib, tomllib
+          print(tomllib.loads(pathlib.Path('sdk/python/pyproject.toml').read_text())['project']['version'])
+          PY
+          )"
+          test "$VERSION" = "$NODE_VERSION"
+          test "$VERSION" = "$PYTHON_VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Run credential guard
+        run: python scripts/security_scan.py
+
+      - name: Validate protocol
+        run: |
+          python -m pip install --disable-pip-version-check check-jsonschema openapi-spec-validator
+          check-jsonschema --check-metaschema schemas/*.json
+          openapi-spec-validator openapi/connect-v1.yaml
+
+      - name: Test PHP SDK
+        working-directory: sdk/php
+        run: |
+          composer validate --strict
+          composer install --no-interaction --no-progress --prefer-dist
+          composer audit --no-interaction
+          composer test
+
+      - name: Test and package TypeScript SDK
+        working-directory: sdk/typescript
+        run: |
+          npm install --no-fund
+          npm audit --audit-level=high
+          npm test
+          mkdir -p ../../dist
+          npm pack --pack-destination ../../dist
+
+      - name: Test and package Python SDK
+        run: |
+          python -m pip install --disable-pip-version-check build pip-audit
+          python -m pip install --disable-pip-version-check ./sdk/python
+          pip-audit --strict
+          python -m unittest discover -s sdk/python/tests -v
+          python -m build --outdir dist sdk/python
+
+      - name: Package PHP SDK and protocol bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          tar -czf "dist/prymestudy-connect-php-${VERSION}.tar.gz" -C sdk/php \
+            --exclude=vendor \
+            --exclude=.phpunit.cache \
+            .
+          tar -czf "dist/prymestudy-connect-protocol-${VERSION}.tar.gz" \
+            README.md LICENSE SECURITY.md CONTRIBUTING.md CHANGELOG.md \
+            docs openapi schemas examples
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --generate-notes \
+            --title "PrymeStudy Connect $GITHUB_REF_NAME"
