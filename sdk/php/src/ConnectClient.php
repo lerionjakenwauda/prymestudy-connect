@@ -21,7 +21,9 @@ final class ConnectClient
     ) {
         $this->http = $http ?? new Client([
             'timeout' => $config->requestTimeoutSeconds,
+            'connect_timeout' => min(10, $config->requestTimeoutSeconds),
             'http_errors' => false,
+            'allow_redirects' => false,
         ]);
     }
 
@@ -84,7 +86,10 @@ final class ConnectClient
             $headers['Idempotency-Key'] = $idempotencyKey;
         }
 
-        $options = ['headers' => $headers];
+        $options = [
+            'headers' => $headers,
+            'allow_redirects' => false,
+        ];
         if ($body !== null) {
             $options['json'] = $body;
         }
@@ -129,6 +134,7 @@ final class ConnectClient
                     'User-Agent' => 'prymestudy-connect-php/1.0',
                 ],
                 'form_params' => $form,
+                'allow_redirects' => false,
             ]);
         } catch (GuzzleException $e) {
             throw new ConnectException('Unable to reach the PrymeStudy authorization server.', 'token_transport_error', previous: $e);
