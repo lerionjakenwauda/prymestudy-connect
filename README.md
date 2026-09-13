@@ -17,11 +17,13 @@
 <p align="center">
   <a href="#capabilities">Capabilities</a>
   &nbsp;&middot;&nbsp;
+  <a href="#integration-coverage">Coverage</a>
+  &nbsp;&middot;&nbsp;
   <a href="#official-sdks">SDKs</a>
   &nbsp;&middot;&nbsp;
   <a href="#security-model">Security</a>
   &nbsp;&middot;&nbsp;
-  <a href="#protocol-and-endpoints">Protocol</a>
+  <a href="#production-readiness">Production</a>
   &nbsp;&middot;&nbsp;
   <a href="SECURITY.md">Report a vulnerability</a>
 </p>
@@ -163,6 +165,32 @@ Bulk synchronization is designed for bounded batches, stable external identifier
 
 ---
 
+## Integration coverage
+
+Every Connect application has two independent authorization dimensions:
+
+```text
+Scopes   → what the application may do
+Coverage → where in the academic structure it may do it
+```
+
+Approved coverage can be:
+
+| Coverage | Typical use |
+|---|---|
+| **Institution** | Central university portal, SIS, LMS or ERP |
+| **College / faculty** | Faculty-owned portal or backend |
+| **Department** | Departmental website, portal, association or backend |
+| **Programme** | Programme-specific academic service |
+
+A departmental or programme application is not merely labelled with that unit. PrymeStudy resolves partner academic codes to canonical records and rejects activity outside the application's approved coverage.
+
+Several independently operated departmental websites should receive separate Connect applications, credentials, keys and audit histories instead of sharing one institution-wide credential.
+
+See [`docs/INTEGRATION_COVERAGE.md`](docs/INTEGRATION_COVERAGE.md) for the full model.
+
+---
+
 ## Protocol and endpoints
 
 The public protocol is the source of truth. Official SDKs implement the same protocol rather than defining language-specific behavior.
@@ -185,9 +213,14 @@ Core documentation:
 - [`docs/SSO.md`](docs/SSO.md) — partner SSO and central Identity handoff.
 - [`docs/SIS_AND_LMS.md`](docs/SIS_AND_LMS.md) — academic synchronization and source authority.
 - [`docs/ACADEMIC_MAPPING.md`](docs/ACADEMIC_MAPPING.md) — external-code to canonical PrymeStudy mapping.
+- [`docs/INTEGRATION_COVERAGE.md`](docs/INTEGRATION_COVERAGE.md) — institution, faculty, department and programme authorization boundaries.
 - [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) — sandbox/production isolation.
 - [`docs/ERRORS.md`](docs/ERRORS.md) — stable machine-readable errors.
 - [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md) — signed event delivery and replay handling.
+- [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) — mandatory controls before production access.
+- [`docs/PARTNER_CERTIFICATION.md`](docs/PARTNER_CERTIFICATION.md) — partner sandbox certification and acceptance tests.
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — key rotation, incident containment and operating procedures.
+- [`docs/VERSIONING.md`](docs/VERSIONING.md) — compatibility, deprecation and release policy.
 - [`openapi/connect-v1.yaml`](openapi/connect-v1.yaml) — machine-readable OpenAPI 3.1 contract.
 
 Machine-readable JSON Schemas:
@@ -257,6 +290,7 @@ Security requirements include:
 - exact callback/return destination policy;
 - scoped API authorization;
 - institution and integration isolation;
+- academic coverage isolation for faculty, department and programme integrations;
 - idempotency for mutation workflows;
 - request and payload bounds;
 - key rotation, expiry and revocation;
@@ -288,6 +322,8 @@ Partners send codes they own:
 PrymeStudy maps those values to canonical PrymeStudy academic records.
 
 If a required mapping is missing or ambiguous, Connect fails safely. It does not guess an institution, department, programme, level or course.
+
+A valid mapping does not grant an application access beyond its approved integration coverage.
 
 ---
 
@@ -353,6 +389,36 @@ Production
 Sandbox credentials cannot authenticate against production resources.
 
 A production incident affecting one integration can be contained by rotating or revoking that integration without disabling unrelated systems.
+
+---
+
+## Production readiness
+
+Creating a sandbox application does not grant production access.
+
+The production lifecycle is intentionally controlled:
+
+```text
+Create sandbox application
+        ↓
+Register public key
+        ↓
+Configure academic mappings
+        ↓
+Pass partner certification
+        ↓
+Request production
+        ↓
+PrymeStudy platform review
+        ↓
+Separate production application + production key
+        ↓
+Approval and controlled smoke test
+```
+
+Institution administrators can request production access but cannot self-approve it. Production approval, suspension and reactivation remain central PrymeStudy platform operations.
+
+Before any university, department or association is approved for production, use [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) and [`docs/PARTNER_CERTIFICATION.md`](docs/PARTNER_CERTIFICATION.md) as the release gates.
 
 ---
 
