@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { importPKCS8, SignJWT } from "jose";
 
 export type ConnectAlgorithm = "ES256";
@@ -194,12 +195,23 @@ function validateConfig(config: ConnectConfig): void {
   if ((config.algorithm ?? "ES256") !== "ES256") throw new TypeError("PrymeStudy Connect v1 supports ES256 client assertions.");
   assertSecureEndpoint(config.tokenEndpoint, "tokenEndpoint", false);
   assertSecureEndpoint(config.apiBaseUrl, "apiBaseUrl", true);
+  assertP256PrivateKey(config.privateKeyPem);
 
   const ttl = config.assertionTtlSeconds ?? 120;
   if (ttl < 30 || ttl > 300) throw new RangeError("assertionTtlSeconds must be between 30 and 300 seconds.");
   const timeout = config.requestTimeoutMs ?? 15_000;
   if (timeout < 1_000 || timeout > 120_000) throw new RangeError("requestTimeoutMs must be between 1000 and 120000 milliseconds.");
   for (const scope of config.scopes ?? []) if (!scope.trim()) throw new TypeError("scopes must contain non-empty strings.");
+}
+
+function assertP256PrivateKey(privateKeyPem: string): void {
+  try {
+    const key = createPrivateKey(privateKeyPem);
+    const curve = key.asymmetricKeyDetails?.namedCurve;
+    if (key.asymmetricKeyType !== "ec" || (curve !== "prime256v1" && curve !== "P-256")) throw new Error();
+  } catch {
+    throw new TypeError("privateKeyPem must contain an EC P-256 private key.");
+  }
 }
 
 function assertSecureEndpoint(value: string, name: string, baseUrl: boolean): void {
