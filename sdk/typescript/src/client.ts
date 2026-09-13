@@ -94,7 +94,7 @@ export class ConnectClient {
     if (!path.startsWith("/")) throw new TypeError("Connect API paths must start with /.");
 
     const token = await this.#getAccessToken();
-    const url = new URL(path.replace(/^\//, ""), ensureTrailingSlash(this.#config.apiBaseUrl));
+    const url = new URL(path.replace(/^\/+/, ""), ensureTrailingSlash(this.#config.apiBaseUrl));
     const headers = new Headers({
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
@@ -106,6 +106,7 @@ export class ConnectClient {
     const init: RequestInit = {
       method: method.toUpperCase(),
       headers,
+      redirect: "error",
       signal: AbortSignal.timeout(this.#config.requestTimeoutMs),
     };
     if (body !== undefined) init.body = JSON.stringify(body);
@@ -148,6 +149,7 @@ export class ConnectClient {
           "User-Agent": "prymestudy-connect-node/1.0",
         },
         body: params,
+        redirect: "error",
         signal: AbortSignal.timeout(this.#config.requestTimeoutMs),
       });
     } catch (error) {
@@ -184,12 +186,14 @@ export class ConnectClient {
 }
 
 function validateConfig(config: ConnectConfig): void {
-  if (!config.clientId) throw new TypeError("clientId is required.");
+  if (!config.clientId || config.clientId.length > 120) throw new TypeError("clientId is required and must not exceed 120 characters.");
   if (!config.privateKeyPem) throw new TypeError("privateKeyPem is required.");
-  if (!config.keyId) throw new TypeError("keyId is required.");
+  if (!config.keyId || config.keyId.length > 120 || !/^[A-Za-z0-9._-]+$/.test(config.keyId)) {
+    throw new TypeError("keyId must contain only letters, numbers, dot, underscore or hyphen and must not exceed 120 characters.");
+  }
   if ((config.algorithm ?? "ES256") !== "ES256") throw new TypeError("PrymeStudy Connect v1 supports ES256 client assertions.");
-  assertAbsoluteHttpUrl(config.tokenEndpoint, "tokenEndpoint");
-  assertAbsoluteHttpUrl(config.apiBaseUrl, "apiBaseUrl");
+  assertSecureEndpoint(config.tokenEndpoint, "tokenEndpoint", false);
+  assertSecureEndpoint(config.apiBaseUrl, "apiBaseUrl", true);
 
   const ttl = config.assertionTtlSeconds ?? 120;
   if (ttl < 30 || ttl > 300) throw new RangeError("assertionTtlSeconds must be between 30 and 300 seconds.");
@@ -198,13 +202,31 @@ function validateConfig(config: ConnectConfig): void {
   for (const scope of config.scopes ?? []) if (!scope.trim()) throw new TypeError("scopes must contain non-empty strings.");
 }
 
-function assertAbsoluteHttpUrl(value: string, name: string): void {
+function assertSecureEndpoint(value: string, name: string, baseUrl: boolean): void {
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+    url = new URL(value);
   } catch {
-    throw new TypeError(`${name} must be an absolute HTTP(S) URL.`);
+    throw new TypeError(`${name} must be an absolute URL.`);
   }
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new TypeError(`${name} must not contain credentials, a query string or a fragment.`);
+  }
+
+  const loopback = isLoopbackHost(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new TypeError(`${name} must use HTTPS. HTTP is allowed only for loopback development hosts.`);
+  }
+
+  if (baseUrl && url.pathname !== "/") {
+    throw new TypeError(`${name} must be an origin/base URL without a path.`);
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
 }
 
 function ensureTrailingSlash(value: string): string {
