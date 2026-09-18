@@ -1,0 +1,25 @@
+{
+  "name": "prymestudy/connect",
+  "description": "Official PHP SDK for PrymeStudy Connect institutional integrations.",
+  "type": "library",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/lerionjakenwauda/prymestudy-connect",
+  "support": {
+    "issues": "https://github.com/lerionjakenwauda/prymestudy-connect/issues",
+    "source": "https://github.com/lerionjakenwauda/prymestudy-connect"
+  },
+  "require": {
+    "php": "^8.2",
+    "ext-json": "*",
+    "ext-openssl": "*",
+    "guzzlehttp/guzzle": "^7.9"
+  },
+  "autoload": {
+    "psr-4": {
+      "PrymeStudy\\Connect\\": "sdk/php/src/"
+    }
+  },
+  "config": {
+    "sort-packages": true
+  }
+}
