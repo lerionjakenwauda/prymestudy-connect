@@ -82,6 +82,13 @@ jobs:
           npm audit --audit-level=high
           npm test
 
+      - name: Prepare npm provenance metadata
+        working-directory: sdk/typescript
+        run: |
+          npm pkg set repository.type=git
+          npm pkg set repository.url=git+https://github.com/lerionjakenwauda/prymestudy-connect.git
+          npm pkg set repository.directory=sdk/typescript
+
       - name: Publish
         working-directory: sdk/typescript
         env:
