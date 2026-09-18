@@ -38,7 +38,9 @@ jobs:
           php-version: "8.3"
           tools: composer:v2
           coverage: none
-      - name: Validate package
+      - name: Validate Packagist root package
+        run: composer validate --strict composer.json
+      - name: Validate SDK package
         working-directory: sdk/php
         run: composer validate --strict
       - name: Install dependencies
