@@ -221,6 +221,7 @@ Core documentation:
 - [`docs/PARTNER_CERTIFICATION.md`](docs/PARTNER_CERTIFICATION.md) — partner sandbox certification and acceptance tests.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — key rotation, incident containment and operating procedures.
 - [`docs/VERSIONING.md`](docs/VERSIONING.md) — compatibility, deprecation and release policy.
+- [`docs/PUBLISHING.md`](docs/PUBLISHING.md) — tagged release and npm/PyPI/Packagist publishing process.
 - [`openapi/connect-v1.yaml`](openapi/connect-v1.yaml) — machine-readable OpenAPI 3.1 contract.
 
 Machine-readable JSON Schemas:
@@ -243,6 +244,25 @@ This repository maintains first-class SDK implementations for:
 | **TypeScript / Node.js** | [`sdk/typescript`](sdk/typescript) | Express, NestJS, Fastify, Next.js server runtimes and Node services |
 | **Python** | [`sdk/python`](sdk/python) | Django, Flask, FastAPI and Python services |
 | **Raw HTTPS** | [`examples/raw-http`](examples/raw-http) | Java, .NET, Go, Ruby, Rust and other backend stacks |
+
+## Installation
+
+Official registry coordinates for tagged SDK releases are:
+
+```bash
+# TypeScript / Node.js
+npm install @prymestudy/connect
+
+# PHP / Laravel
+composer require prymestudy/connect
+
+# Python
+pip install prymestudy-connect
+```
+
+SDK credentials and private signing keys are **server-side only**. Never install or configure Connect private credentials in browser JavaScript, React client bundles or mobile applications.
+
+Registry publication is tied to tagged releases. See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the release/publishing process. Production API access remains separately approval-gated even when the SDK package is publicly installable.
 
 All official SDKs follow the same core behavior:
 
