@@ -1,0 +1,126 @@
+name: Publish Connect Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Released semantic version without the v prefix (for example 1.0.0)"
+        required: true
+        type: string
+      package:
+        description: "Registry package to publish"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - npm
+          - pypi
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify released source
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify tag, package versions and changelog
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          test "$(git describe --tags --exact-match)" = "v${VERSION}"
+          NODE_VERSION="$(node -p "require('./sdk/typescript/package.json').version")"
+          PYTHON_VERSION="$(python - <<'PY'
+          import pathlib, tomllib
+          print(tomllib.loads(pathlib.Path('sdk/python/pyproject.toml').read_text())['project']['version'])
+          PY
+          )"
+          test "$VERSION" = "$NODE_VERSION"
+          test "$VERSION" = "$PYTHON_VERSION"
+          grep -F "## [$VERSION] -" CHANGELOG.md >/dev/null
+          python scripts/security_scan.py
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  npm:
+    name: Publish npm package
+    needs: verify
+    if: ${{ inputs.package == 'all' || inputs.package == 'npm' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: v${{ inputs.version }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install, test and build
+        working-directory: sdk/typescript
+        run: |
+          npm install --no-fund
+          npm audit --audit-level=high
+          npm test
+
+      - name: Publish
+        working-directory: sdk/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  pypi:
+    name: Publish PyPI package
+    needs: verify
+    if: ${{ inputs.package == 'all' || inputs.package == 'pypi' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: v${{ inputs.version }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Audit and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check build pip-audit twine
+          python - <<'PY' > /tmp/prymestudy-connect-requirements.txt
+          import pathlib
+          import tomllib
+          data = tomllib.loads(pathlib.Path('sdk/python/pyproject.toml').read_text(encoding='utf-8'))
+          print('\n'.join(data['project']['dependencies']))
+          PY
+          pip-audit --strict -r /tmp/prymestudy-connect-requirements.txt
+          python -m pip install --disable-pip-version-check ./sdk/python
+          python -m unittest discover -s sdk/python/tests -v
+
+      - name: Build distribution
+        run: python -m build --outdir dist sdk/python
+
+      - name: Publish
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --non-interactive dist/*
